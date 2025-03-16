@@ -1,2 +1,114 @@
 兄弟你好香
+* 主程序 - 优化后的图像识别流程
+
+* 1. 数据预处理模块
+* 打开固定大小窗口
+dev_open_window (0, 0, 512, 512, 'black', WindowHandle)
+
+* 获取图像文件列表
+ImageFiles := [] 
+try
+    list_files ('water_images', ['files'], AllFiles)
+    tuple_regexp_select (AllFiles, '.*\\.jpg$', ImageFiles)
+    if (|ImageFiles| = 0)
+        disp_message (WindowHandle, '未找到 JPG 文件: E:/images', 'window', 12, 12, 'red', 'false')
+        wait_seconds (2)
+        dev_close_window ()                                                                                                                                                                                                                                                                                          
+        stop ()
+    endif
+catch (Exception)
+    disp_message (WindowHandle, '路径错误或无 JPG 文件: E:/images', 'window', 12, 12, 'red', 'false')
+    wait_seconds (2)
+    dev_close_window ()
+    stop ()
+endtry
+
+* 主处理循环
+for Index := 0 to |ImageFiles| - 1 by 1
+    * 1.1 图像采集与预处理
+    try
+        read_image (Image, ImageFiles[Index])
+        get_image_size (Image, Width, Height)
+        * 增强：调整对比度以处理光照不均
+        scale_image (Image, EnhancedImage, 1.5, 0)
+    catch (Exception)
+        disp_message (WindowHandle, '无法读取或预处理图片: ' + ImageFiles[Index], 'window', 12, 12, 'red', 'false')
+        wait_seconds (2)
+        continue
+    endtry
+
+    * 2. 特征提取模块
+    * 分解RGB通道以提取颜色特征
+    decompose3 (EnhancedImage, Red, Green, Blue)
+    * 阈值分割提取绿色区域（类似卷积提取特定特征）
+    threshold (Green, GreenRegion, 50, 255)
+    * 连通区域分析（类似池化，降低噪声影响）
+    connection (GreenRegion, ConnectedRegions)
+
+    * 3. 特征融合与筛选模块
+    gen_empty_obj (Regions)
+    try
+        * 筛选面积特征，类似全连接层整合信息
+        select_shape (ConnectedRegions, Regions, 'area', 'and', 10, 100000)
+        FinalRegions := Regions
+    catch (Exception)
+        disp_message (WindowHandle, '区域选择失败: ' + ImageFiles[Index], 'window', 12, 12, 'yellow', 'false')
+        FinalRegions := ConnectedRegions  * 出错时使用未筛选区域
+    endtry
+
+    * 4. 特征量化与指标计算模块
+    * 计算覆盖率（面积占比）
+    area_center (FinalRegions, Area, Row, Column)
+    Coverage := (|Area| > 0) ? (sum(Area) / (Width * Height)) * 100 : 0
+
+    * 计算密度（独立区域数量）
+    count_obj (FinalRegions, Number)
+    Density := Number
+
+    * 计算平均亮度（全局特征）
+    rgb1_to_gray (EnhancedImage, GrayImage)
+    gen_rectangle1 (FullRegion, 0, 0, Height - 1, Width - 1)
+    try
+        intensity (GrayImage, FullRegion, MeanBrightness, Variance)
+        Brightness := MeanBrightness[0]
+    catch (Exception)
+        disp_message (WindowHandle, '亮度计算失败: ' + ImageFiles[Index], 'window', 12, 12, 'red', 'false')
+        Brightness := 0
+    endtry
+
+    * 计算绿色分布（颜色特征）
+    try
+        gray_histo (FullRegion, Green, AbsoluteHisto, RelativeHisto)
+        tuple_select_range (RelativeHisto, 50, 255, GreenDistribution)
+        tuple_sum (GreenDistribution, GreenPercentage)
+        GreenPercentage := GreenPercentage * 100
+    catch (Exception)
+        disp_message (WindowHandle, '颜色分布计算失败: ' + ImageFiles[Index], 'window', 12, 12, 'yellow', 'false')
+        GreenPercentage := 0
+    endtry
+
+    * 5. 模型评估与可视化模块
+    * 显示处理结果
+    dev_clear_window ()
+    dev_display (EnhancedImage)
+    dev_set_color ('red')
+    dev_display (FinalRegions)
+
+    * 显示所有计算指标
+    dev_set_color ('white')
+    disp_message (WindowHandle, '图片: ' + ImageFiles[Index] + '\n' + \
+                  '覆盖率: ' + Coverage + '%\n' + \
+                  '密度: ' + Density + '块\n' + \
+                  '亮度: ' + Brightness + '\n' + \
+                  '绿色占比: ' + GreenPercentage + '%', \
+                  'window', 12, 12, 'white', 'false')
+
+    wait_seconds (2)
+
+    * 保存结果（类似模型部署输出）
+    write_tuple ([Coverage, Density, Brightness, GreenPercentage], 'results_' + Index + '.txt')
+endfor
+
+* 关闭窗口
+dev_close_window ()
 
